@@ -1,0 +1,48 @@
+/* FixCV styles: mobile-first, high contrast, no decoration. New work 2026-10-28. */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  color: #14201a;
+  background: #f2f4f1;
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: #123c2b;
+  color: #fff;
+  font-weight: 700;
+}
+#langBadge { font-weight: 400; font-size: 0.85rem; }
+main { max-width: 640px; margin: 0 auto; padding: 1rem; }
+section { background: #fff; border: 1px solid #d6dcd6; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+h2 { font-size: 1.05rem; margin: 1rem 0 0.4rem; }
+.disclaimer { font-size: 0.92rem; border-left: 4px solid #b98a00; padding-left: 0.6rem; margin: 0.4rem 0; }
+.hint { color: #3c4a43; font-size: 0.95rem; }
+.error { color: #a4161a; font-weight: 600; }
+.langrow, .btnrow { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.6rem; }
+button {
+  font-size: 1rem;
+  padding: 0.65rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid #123c2b;
+  background: #fff;
+  color: #123c2b;
+  cursor: pointer;
+}
+button.primary { background: #123c2b; color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+.camwrap { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; overflow: hidden; }
+.camwrap video, .camwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+textarea { width: 100%; font-size: 1rem; padding: 0.5rem; border-radius: 8px; border: 1px solid #9aa79f; margin-top: 0.3rem; }
+ol#steps li, ul li { margin-bottom: 0.5rem; }
+ol#steps li.done { text-decoration: line-through; color: #3c4a43; }
+.card { border: 1px solid #9aa79f; border-radius: 8px; padding: 0.7rem; margin-top: 0.6rem; }
+#screen-stop { border-color: #a4161a; }
+#screen-stop h1 { color: #a4161a; }
+#verifyMsg { font-weight: 600; }
