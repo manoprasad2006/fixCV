@@ -1,0 +1,39 @@
+{
+  "lang": "en",
+  "language_name": "English",
+  "reviewed": true,
+  "disclaimer": "Guidance only. Stop and call a professional if unsure or if there's any danger.",
+  "stop": {
+    "title": "Stop — call a professional",
+    "generic": "This looks unsafe to fix yourself. Stop and call a qualified professional.",
+    "gas": "This may involve gas. Do not attempt a repair. Turn off the supply only if it is safe, leave the area, and call a qualified professional.",
+    "electricity": "This may involve mains electricity. Do not touch exposed parts. Call a qualified electrician.",
+    "fuel": "This may involve fuel. Keep flames and sparks away and call a qualified professional.",
+    "structural": "This may affect the structure of the building. Do not disturb it. Call a qualified professional.",
+    "brakes": "This involves vehicle brakes. Do not ride or drive. Take the vehicle to a qualified mechanic.",
+    "medical": "FixCV cannot help with injuries or health issues. Please contact a medical professional.",
+    "model": "The assistant flagged this as unsafe. Stop and call a qualified professional."
+  },
+  "ui": {
+    "appName": "FixCV",
+    "tagline": "Repair help in your language",
+    "chooseLanguage": "Choose your language",
+    "start": "Start",
+    "tapPrompt": "Point the camera at the broken object, then tap the faulty part.",
+    "describeLabel": "Describe the problem",
+    "describePlaceholder": "e.g. The bike chain keeps slipping off",
+    "speak": "Speak",
+    "getSteps": "Get repair steps",
+    "causeLabel": "Likely cause",
+    "stepOf": "Step",
+    "showResult": "Show the result",
+    "verify": "Check this step",
+    "confirmed": "Confirmed — moving on.",
+    "summaryTitle": "Session summary",
+    "fixed": "Fixed",
+    "notFixed": "Not fixed",
+    "callPro": "Call a professional if anything is still wrong or feels unsafe.",
+    "newSession": "New session",
+    "needInfo": "The assistant needs more information"
+  }
+}
