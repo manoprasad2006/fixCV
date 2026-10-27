@@ -1,0 +1,17 @@
+# Secrets — never commit real keys
+.env
+.env.local
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Demo artifacts (large; link instead)
+/demo/*.mp4
+/demo/*.mov
