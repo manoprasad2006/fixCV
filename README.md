@@ -16,12 +16,14 @@ same language — then looks at each finished step and confirms it or corrects i
 
 ## How to run locally
 
-Requirements: Node.js 20+ (no other dependencies; no install step).
+Requirements: Node.js 22+ and one dependency (`@meta-sam/parser`, Meta's
+official SAM output parser, zero transitive deps).
 
 1. Clone the repo:
    `git clone https://github.com/manoprasad2006/fixCV.git`
 2. Enter it: `cd fixCV`
-3. Copy the env template: `cp .env.example .env` (Windows: `copy .env.example .env`)
+3. Install: `npm install`
+4. Copy the env template: `cp .env.example .env` (Windows: `copy .env.example .env`)
 4. Edit `.env` and set `MODEL_API_KEY` to your Meta Model API key from
    dev.meta.ai. Leave `MUSE_SPARK_MODEL` empty to use the verified default
    (`muse-spark-1.3`). `BASETEN_API_KEY` is optional (open-weights bonus path).
@@ -63,6 +65,12 @@ history. No code, prompts, or assets were reused from older projects.
   (`9725cf9`)
 - **2026-10-28**: single-page frontend — camera + tap overlay, mic with typed
   fallback, step cards, stop screen, summary; offline smoke test (`2338e9b`)
+- **2026-10-28**: README + demo shot list (`2dbf2ee`); ASR endpoint verified
+  and live `/transcribe` with in-browser 16 kHz WAV; live E2E green
+  (`7a262b3`, `a28847b`, `cecd626`)
+- **2026-10-28**: SAM 3.1 verified via Responses API; live `/segment` with
+  point prompts; box + RLE mask canvas overlay; Spark empty-reply retry
+  (`16152fa`)
 
 ## Safety rules
 
