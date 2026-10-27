@@ -3,6 +3,8 @@
    New work, 2026-10-28. */
 'use strict';
 
+import { decodeRleToRaster } from '/shared/rle.js';
+
 const $ = (id) => document.getElementById(id);
 const state = { lang: 'en', strings: null, sessionId: null, frame: null, media: null, recording: null };
 
@@ -80,6 +82,8 @@ function captureFrame(maxDim = 960) {
   c.width = Math.round(v.videoWidth * scale);
   c.height = Math.round(v.videoHeight * scale);
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  state.frameW = c.width;
+  state.frameH = c.height;
   return c.toDataURL('image/jpeg', 0.8);
 }
 
@@ -105,15 +109,58 @@ $('overlay').addEventListener('click', async (ev) => {
   state.frame = captureFrame();
   $('segStatus').textContent = '…';
   try {
-    const res = await api('/segment', { sessionId: state.sessionId, image: state.frame, x, y });
-    $('segStatus').textContent = res.note || 'ok';
-    // TODO: draw returned mask outline on overlay when SAM endpoint is live.
+    const res = await api('/segment', {
+      sessionId: state.sessionId,
+      image: state.frame,
+      x,
+      y,
+      w: state.frameW,
+      h: state.frameH,
+    });
+    drawMasks(res.masks || []);
+    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
   } catch (err) {
-    // /segment is 501 until the SAM 3.1 endpoint is verified; the captured
-    // frame is still used for diagnosis.
+    // The captured frame is still used for diagnosis.
     $('segStatus').textContent = String(err.message || err).slice(0, 160);
   }
 });
+
+/* Draw SAM boxes + masks on the overlay canvas. */
+function drawMasks(masks) {
+  const ov = $('overlay');
+  const v = $('video');
+  ov.width = v.clientWidth;
+  ov.height = v.clientHeight;
+  const ctx = ov.getContext('2d');
+  ctx.clearRect(0, 0, ov.width, ov.height);
+  for (const m of masks) {
+    const fw = m.frame?.w || state.frameW;
+    const fh = m.frame?.h || state.frameH;
+    const sx = ov.width / fw;
+    const sy = ov.height / fh;
+    if (m.rle) {
+      const { data, width, height } = decodeRleToRaster(m.rle);
+      const off = document.createElement('canvas');
+      off.width = width;
+      off.height = height;
+      const octx = off.getContext('2d');
+      const img = octx.createImageData(width, height);
+      for (let i = 0; i < data.length; i++) {
+        img.data[i * 4] = 255;
+        img.data[i * 4 + 1] = 214;
+        img.data[i * 4 + 2] = 10;
+        img.data[i * 4 + 3] = data[i] ? 110 : 0;
+      }
+      octx.putImageData(img, 0, 0);
+      ctx.drawImage(off, 0, 0, ov.width, ov.height);
+    }
+    if (m.box) {
+      ctx.strokeStyle = '#ffd60a';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(m.box.left * sx, m.box.top * sy, (m.box.right - m.box.left) * sx, (m.box.bottom - m.box.top) * sy);
+    }
+  }
+}
 
 /* 16-bit PCM mono WAV data URL from Float32 samples. */
 function encodeWavDataUrl(samples, sampleRate) {

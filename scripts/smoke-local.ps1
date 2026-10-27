@@ -21,6 +21,7 @@ try {
     -ContentType 'application/json'
   Write-Output ("diagnose-unsafe: stopped={0} category={1} title={2}" -f $d.stopped, $d.category, $d.title)
 
+  # /segment is wired: empty body -> 404 no_session (offline, no model call)
   try {
     Invoke-RestMethod "http://localhost:$port/segment" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null
     Write-Output '/segment: UNEXPECTED 200'

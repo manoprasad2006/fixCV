@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { checkHardStop } from './safety.js';
 import { createSession, getSession, setSteps, advanceStep, appendHistory, summary } from './session.js';
 import { sparkChat, renderPrompt, userMessage, transcribe } from './meta.js';
+import { segmentAtPoint } from './sam.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 3000);
@@ -89,9 +90,13 @@ function serveStatic(reqUrl, res) {
   let rel = reqUrl === '/' ? '/index.html' : reqUrl;
   const file = normalize(join(ROOT, 'frontend', '.' + rel));
   if (!file.startsWith(join(ROOT, 'frontend'))) return send(res, 403, { error: 'forbidden' });
-  // Locales are served too, from /locales/<lang>.json
-  const locFile = normalize(join(ROOT, '.' + rel));
-  const target = existsSync(file) ? file : rel.startsWith('/locales/') && existsSync(locFile) ? locFile : null;
+  // Locales and shared JS modules are served too.
+  const rootFile = normalize(join(ROOT, '.' + rel));
+  const target = existsSync(file)
+    ? file
+    : (rel.startsWith('/locales/') || rel.startsWith('/shared/')) && existsSync(rootFile)
+      ? rootFile
+      : null;
   if (!target) return send(res, 404, { error: 'not_found' });
   const ext = target.slice(target.lastIndexOf('.'));
   res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
@@ -162,7 +167,15 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { status: parsed.status, message: parsed.message, done: false });
     }
     if (req.method === 'POST' && url.pathname === '/segment') {
-      return send(res, 501, { error: 'segment_unavailable', reason: 'SAM 3.1 API endpoint not yet verified. See docs/api-notes.md section 5.' });
+      const { sessionId, image = '', x = 0.5, y = 0.5, w = 0, h = 0 } = await readJson(req);
+      const s = getSession(sessionId);
+      if (!s) return send(res, 404, { error: 'no_session' });
+      if (!String(image).startsWith('data:image/')) {
+        return send(res, 400, { error: 'bad_image', reason: 'Send a frame as an image data URL.' });
+      }
+      const out = await segmentAtPoint(image, x, y, w, h);
+      appendHistory(sessionId, { kind: 'segment', masks: out.masks.length });
+      return send(res, 200, out);
     }
     if (req.method === 'POST' && url.pathname === '/transcribe') {
       const { sessionId, audio = '' } = await readJson(req);

@@ -1,0 +1,13 @@
+{
+  "name": "fixcv",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backend/server.js",
+    "test": "node --test backend/safety.test.js backend/session.test.js backend/sam.test.js"
+  },
+  "dependencies": {
+    "@meta-sam/parser": "^0.1.0"
+  }
+}

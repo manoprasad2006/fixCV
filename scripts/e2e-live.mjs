@@ -65,11 +65,18 @@ try {
     show(`3 stop[${lang}]`, `stopped=${r.data.stopped} category=${r.data.category} title=${r.data.title}`);
   }
 
-  // 4. Verify loop on the English session (goal step 6)
+  // 4. Segment endpoint on a synthetic image (goal step 3)
+  const { redSquarePng } = await import('./lib/png.mjs');
+  const segImg = 'data:image/png;base64,' + redSquarePng().toString('base64');
+  const sg = await post('/segment', { sessionId: en.data.id, image: segImg, x: 0.5, y: 0.5, w: 320, h: 240 });
+  const m0 = sg.data.masks?.[0];
+  show('4 segment', `masks=${sg.data.masks?.length} box=${m0 ? [m0.box.left, m0.box.top, m0.box.right, m0.box.bottom].join(',') : '(none)'} rle=${m0?.rle ? m0.rle.counts.length + ' counts' : '(none)'}`);
+
+  // 5. Verify loop on the English session (goal step 6)
   const vf = await post('/verify', { sessionId: en.data.id, image: px, note: 'cleaned the chain' });
-  show('4 verify', `status=${vf.data.status} msg=${vf.data.message} done=${vf.data.done}`);
+  show('5 verify', `status=${vf.data.status} msg=${vf.data.message} done=${vf.data.done}`);
   const sum = await fetch(`${BASE}/session?id=${en.data.id}`).then((r) => r.json());
-  show('4 summary', `steps=${sum.steps?.length} current=${sum.currentStep} done=${sum.done}`);
+  show('5 summary', `steps=${sum.steps?.length} current=${sum.currentStep} done=${sum.done}`);
 } finally {
   server.kill();
 }

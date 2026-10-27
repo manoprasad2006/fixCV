@@ -45,7 +45,21 @@ export async function sparkChat(messages, { model = SPARK_MODEL, maxTokens = 200
   if (!res.ok) {
     throw new Error(`Meta API ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
   }
-  const content = data?.choices?.[0]?.message?.content;
+  let content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    // Spark can spend the whole budget on hidden reasoning (observed once on
+    // /verify even at 2000 tokens). Retry once with double the budget.
+    const retry = await fetch(`${META_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: maxTokens * 2, messages }),
+    });
+    const rdata = await retry.json().catch(() => ({}));
+    if (!retry.ok) {
+      throw new Error(`Meta API ${retry.status}: ${JSON.stringify(rdata).slice(0, 300)}`);
+    }
+    content = rdata?.choices?.[0]?.message?.content;
+  }
   if (!content) throw new Error('Empty reply from model (content null)');
   return content;
 }
