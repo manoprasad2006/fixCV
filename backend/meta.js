@@ -34,7 +34,7 @@ function assertKey() {
  * max_tokens must be generous: Spark spends tokens on hidden reasoning
  * before producing content (verified: 60 tokens -> content null).
  */
-export async function sparkChat(messages, { model = SPARK_MODEL, maxTokens = 1200 } = {}) {
+export async function sparkChat(messages, { model = SPARK_MODEL, maxTokens = 2000 } = {}) {
   assertKey();
   const res = await fetch(`${META_BASE}/chat/completions`, {
     method: 'POST',
