@@ -42,7 +42,21 @@ export async function openChat(messages, { model = OPEN_MODEL, maxTokens = 1500 
   if (!res.ok) {
     throw new Error(`Baseten ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
   }
-  const content = data?.choices?.[0]?.message?.content;
+  let content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    // The open model reasons verbosely and can exhaust the budget before
+    // answering. Retry once with double the budget.
+    const retry = await fetch(`${BASETEN_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: maxTokens * 2, messages }),
+    });
+    const rdata = await retry.json().catch(() => ({}));
+    if (!retry.ok) {
+      throw new Error(`Baseten ${retry.status}: ${JSON.stringify(rdata).slice(0, 300)}`);
+    }
+    content = rdata?.choices?.[0]?.message?.content;
+  }
   if (!content) throw new Error('Empty reply from open model (content null)');
   return content;
 }
