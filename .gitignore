@@ -18,3 +18,6 @@ Thumbs.db
 
 # Generated probe audio (recreated at run time)
 /scripts/*.wav
+
+# Builder inbox: speech clips + test footage (rights-sensitive, never committed)
+/demo/inbox/
