@@ -11,6 +11,12 @@ import { checkHardStop } from './safety.js';
 import { createSession, getSession, setSteps, advanceStep, appendHistory, summary } from './session.js';
 import { sparkChat, renderPrompt, userMessage, transcribe } from './meta.js';
 import { segmentAtPoint } from './sam.js';
+import { openChat, openModelEnabled } from './baseten.js';
+
+/** Reasoning backend: Baseten open model when selected, else Muse Spark. */
+function reason(messages) {
+  return openModelEnabled() ? openChat(messages) : sparkChat(messages);
+}
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 3000);
@@ -129,7 +135,7 @@ const server = createServer(async (req, res) => {
         language_name: LANG_NAMES[s.language],
         transcript,
       });
-      const reply = await sparkChat([userMessage(prompt, image)]);
+      const reply = await reason([userMessage(prompt, image)]);
       const post = checkHardStop(reply);
       if (post.stopped) return send(res, 200, stopResponse(s.language, post.category));
       const parsed = parseDiagnose(reply);
@@ -154,7 +160,7 @@ const server = createServer(async (req, res) => {
         step_text: `Step ${s.currentStep + 1}: ${cur.text}`,
         note,
       });
-      const reply = await sparkChat([userMessage(prompt, image)]);
+      const reply = await reason([userMessage(prompt, image)]);
       const post = checkHardStop(reply);
       if (post.stopped) return send(res, 200, stopResponse(s.language, post.category));
       const parsed = parseVerify(reply);
