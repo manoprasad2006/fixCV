@@ -15,3 +15,6 @@ Thumbs.db
 # Demo artifacts (large; link instead)
 /demo/*.mp4
 /demo/*.mov
+
+# Generated probe audio (recreated at run time)
+/scripts/*.wav
