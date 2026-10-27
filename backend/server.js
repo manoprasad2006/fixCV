@@ -9,7 +9,7 @@ import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHardStop } from './safety.js';
 import { createSession, getSession, setSteps, advanceStep, appendHistory, summary } from './session.js';
-import { sparkChat, renderPrompt, userMessage } from './meta.js';
+import { sparkChat, renderPrompt, userMessage, transcribe } from './meta.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 3000);
@@ -165,7 +165,16 @@ const server = createServer(async (req, res) => {
       return send(res, 501, { error: 'segment_unavailable', reason: 'SAM 3.1 API endpoint not yet verified. See docs/api-notes.md section 5.' });
     }
     if (req.method === 'POST' && url.pathname === '/transcribe') {
-      return send(res, 501, { error: 'transcribe_unavailable', reason: 'ASR endpoint not yet verified. See docs/api-notes.md section 4.' });
+      const { sessionId, audio = '' } = await readJson(req);
+      const s = getSession(sessionId);
+      if (!s) return send(res, 404, { error: 'no_session' });
+      const m = String(audio).match(/^data:(audio\/(?:wav|x-wav));base64,(.+)$/);
+      if (!m) return send(res, 400, { error: 'unsupported_audio', reason: 'Send a 16 kHz WAV data URL.' });
+      const text = await transcribe(Buffer.from(m[2], 'base64'), { language: s.language });
+      appendHistory(sessionId, { kind: 'transcribe', chars: text.length });
+      const gate = checkHardStop(text);
+      if (gate.stopped) return send(res, 200, { text, ...stopResponse(s.language, gate.category) });
+      return send(res, 200, { text });
     }
     return send(res, 404, { error: 'not_found' });
   } catch (err) {

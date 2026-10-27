@@ -59,6 +59,37 @@ export function renderPrompt(name, vars) {
   return tpl;
 }
 
+/**
+ * Speech-to-text via the VERIFIED file endpoint (see docs/api-notes.md):
+ * POST {BASE}/asr/transcribe, multipart parts `request` (JSON:
+ * {model, language, audioEncoding}) + `audio` (WAV bytes).
+ * Returns the transcript string (may be '' for non-speech).
+ */
+export async function transcribe(wavBuffer, { language = 'en' } = {}) {
+  assertKey();
+  const form = new FormData();
+  form.set(
+    'request',
+    JSON.stringify({
+      model: 'muse-voice-transcribe-1.0',
+      language,
+      audioEncoding: 'WAV',
+      sampleRateHertz: 16000,
+    }),
+  );
+  form.set('audio', new Blob([wavBuffer], { type: 'audio/wav' }), 'speech.wav');
+  const res = await fetch(`${META_BASE}/asr/transcribe`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`ASR ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  return String(data?.transcript ?? '');
+}
+
 /** Build a user message with optional frame image (data URL). */
 export function userMessage(text, imageDataUrl) {
   if (!imageDataUrl) return { role: 'user', content: text };

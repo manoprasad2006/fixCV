@@ -115,6 +115,37 @@ $('overlay').addEventListener('click', async (ev) => {
   }
 });
 
+/* 16-bit PCM mono WAV data URL from Float32 samples. */
+function encodeWavDataUrl(samples, sampleRate) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const wstr = (o, s) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+  };
+  wstr(0, 'RIFF');
+  v.setUint32(4, 36 + n * 2, true);
+  wstr(8, 'WAVE');
+  wstr(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  wstr(36, 'data');
+  v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return `data:audio/wav;base64,${btoa(bin)}`;
+}
+
 /* ---- Mic (typed input is the fallback) ---- */
 $('btnSpeak').addEventListener('click', async () => {
   if (state.recording) {
@@ -130,17 +161,23 @@ $('btnSpeak').addEventListener('click', async () => {
       stream.getTracks().forEach((tr) => tr.stop());
       state.recording = null;
       $('btnSpeak').disabled = false;
-      const blob = new Blob(chunks, { type: rec.mimeType });
-      const buf = await blob.arrayBuffer();
-      let bin = '';
-      const bytes = new Uint8Array(buf);
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
       try {
-        const res = await api('/transcribe', {
-          sessionId: state.sessionId,
-          audio: `data:${rec.mimeType};base64,${btoa(bin)}`,
-        });
+        // Decode whatever the browser recorded, resample to 16 kHz mono,
+        // and send WAV — the only encoding verified against the ASR API.
+        const blob = new Blob(chunks, { type: rec.mimeType });
+        const actx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await actx.decodeAudioData(await blob.arrayBuffer());
+        const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+        const src = offline.createBufferSource();
+        src.buffer = decoded;
+        src.connect(offline.destination);
+        src.start();
+        const rendered = await offline.startRendering();
+        const wavUrl = encodeWavDataUrl(rendered.getChannelData(0), 16000);
+        actx.close();
+        const res = await api('/transcribe', { sessionId: state.sessionId, audio: wavUrl });
         if (res.text) $('transcript').value = res.text;
+        if (res.stopped) showStop(res.title, res.message);
       } catch (err) {
         $('fixError').textContent = String(err.message || err).slice(0, 200);
       }

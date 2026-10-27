@@ -21,13 +21,18 @@ try {
     -ContentType 'application/json'
   Write-Output ("diagnose-unsafe: stopped={0} category={1} title={2}" -f $d.stopped, $d.category, $d.title)
 
-  foreach ($ep in @('/segment', '/transcribe')) {
-    try {
-      Invoke-RestMethod "http://localhost:$port$ep" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null
-      Write-Output ($ep + ': UNEXPECTED 200')
-    } catch {
-      Write-Output ($ep + ': ' + [int]$_.Exception.Response.StatusCode)
-    }
+  try {
+    Invoke-RestMethod "http://localhost:$port/segment" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null
+    Write-Output '/segment: UNEXPECTED 200'
+  } catch {
+    Write-Output ('/segment: ' + [int]$_.Exception.Response.StatusCode)
+  }
+  # /transcribe is wired: empty body -> 404 no_session (offline, no model call)
+  try {
+    Invoke-RestMethod "http://localhost:$port/transcribe" -Method Post -Body '{}' -ContentType 'application/json' | Out-Null
+    Write-Output '/transcribe: UNEXPECTED 200'
+  } catch {
+    Write-Output ('/transcribe: ' + [int]$_.Exception.Response.StatusCode)
   }
 
   $page = Invoke-WebRequest "http://localhost:$port/" -UseBasicParsing
