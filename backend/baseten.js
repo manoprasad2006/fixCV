@@ -22,7 +22,7 @@ function loadEnv() {
 
 const env = loadEnv();
 export const BASETEN_BASE = (env.BASETEN_BASE_URL || 'https://inference.baseten.co/v1').replace(/\/$/, '');
-export const OPEN_MODEL = env.MUSE_SPARK_OPEN_MODEL || 'meta-models/muse-spark-open';
+export const OPEN_MODEL = env.MUSE_SPARK_OPEN_MODEL || 'meta-models/muse-spark-open-1026';
 const KEY = env.BASETEN_API_KEY || '';
 
 /** True when the open-weights path is selected AND keyed. */

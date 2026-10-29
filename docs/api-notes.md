@@ -169,9 +169,10 @@ conflict resolved in favor of learnopencv: SAM 3.1 IS hosted on the API.
 
 - Key provided by builder 2026-10-28. Test (`scripts/probe-baseten.mjs`, RUN):
   1. `meta-models/muse-spark-open-1026` (hackathon ID) via OpenAI-compatible
-     `POST https://inference.baseten.co/v1/chat/completions` -> **404**
-     `{"error":"please check the model you provided"}`. Builder told: use the
-     changelog ID (`.env.example` updated).
+     `POST https://inference.baseten.co/v1/chat/completions` -> **404** on the
+     first key, **200** (`PROBE_OK`) on the replacement key. Access to the
+     -1026 deployment is key-gated; keys without access must use the
+     changelog ID below.
   2. `meta-models/muse-spark-open` (changelog ID) -> **200**, `PROBE_OK`.
      Reasoning arrives as visible `reasoning_content` (not hidden tokens).
 - Image support CONFIRMED: same endpoint with `image_url` part -> **200**,
