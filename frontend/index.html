@@ -9,7 +9,7 @@
 <body>
 <header class="topbar">
   <span id="appName">FixCV</span>
-  <span class="topright"><span id="langBadge"></span><button id="btnRestart" hidden></button></span>
+  <span class="topright"><span id="langBadge"></span><button id="btnMode" hidden></button><button id="btnRestart" hidden></button></span>
 </header>
 
 <main>
@@ -49,7 +49,25 @@
     </form>
   </section>
 
-  <!-- Screen 3: stop -->
+  <!-- Screen 3: live session -->
+  <section id="screen-live" class="live" hidden>
+    <div class="livewrap">
+      <canvas id="orb" width="200" height="200"></canvas>
+      <p id="liveStatus" class="livestatus"></p>
+      <div class="livecam">
+        <video id="liveVideo" playsinline muted autoplay></video>
+        <canvas id="liveOverlay"></canvas>
+      </div>
+      <div id="liveTranscript"></div>
+      <div class="livebar">
+        <button id="btnLiveCam" class="round"></button>
+        <button id="btnTalk" class="biground"></button>
+        <button id="btnLiveEnd" class="round danger"></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screen 4: stop -->
   <section id="screen-stop" hidden>
     <h1 id="stopTitle"></h1>
     <p id="stopMessage"></p>

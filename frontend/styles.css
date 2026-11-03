@@ -89,3 +89,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 /* Stop */
 #screen-stop { border-color: #a4161a; }
 #screen-stop h1 { color: #a4161a; }
+
+/* Live session (dark) */
+section.live { background: #0d1512; border-color: #0d1512; color: #e8eeea; }
+.livewrap { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+#orb { width: 150px; height: 150px; }
+.livestatus { min-height: 1.6em; color: #b9c6bf; margin: 0; text-align: center; }
+.livecam { position: relative; width: 190px; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; background: #000; border: 1px solid #2a3831; }
+.livecam video, .livecam canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#liveTranscript { width: 100%; max-height: 30vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.92rem; }
+#liveTranscript .luser { align-self: flex-end; background: #1d4d38; border-radius: 10px; padding: 0.4rem 0.6rem; max-width: 88%; }
+#liveTranscript .lai { align-self: flex-start; background: #1a2420; border: 1px solid #2a3831; border-radius: 10px; padding: 0.4rem 0.6rem; max-width: 88%; }
+.livebar { display: flex; gap: 1rem; align-items: center; margin-top: 0.4rem; }
+.livebar .round { width: 56px; height: 56px; border-radius: 50%; padding: 0; font-size: 0.72rem; background: #1a2420; color: #e8eeea; border: 1px solid #2a3831; }
+.livebar .round.danger { background: #3a1518; border-color: #5c2226; }
+.livebar .biground { width: 84px; height: 84px; border-radius: 50%; padding: 0; font-size: 0.8rem; font-weight: 700; background: #e8eeea; color: #0d1512; border: none; }
+.livebar .biground.live { background: #b31b21; color: #fff; }

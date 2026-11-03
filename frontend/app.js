@@ -5,6 +5,7 @@
 'use strict';
 
 import { decodeRleToRaster } from '/shared/rle.js';
+import { rmsEnergy, isSpeech, shouldStopTalking, shouldSampleFrame } from '/shared/live.js';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -19,9 +20,11 @@ function t(key) {
 }
 
 function show(id) {
-  for (const s of ['screen-lang', 'screen-chat', 'screen-stop']) $(s).hidden = s !== id;
+  for (const s of ['screen-lang', 'screen-chat', 'screen-live', 'screen-stop']) $(s).hidden = s !== id;
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   if (id !== 'screen-chat' && state.tracking) stopTracking();
+  if (id === 'screen-live') enterLive();
+  else leaveLive();
 }
 
 function speak(text) {
@@ -109,11 +112,12 @@ async function api(path, body) {
   return data;
 }
 
-async function streamApi(path, body, onDelta) {
+async function streamApi(path, body, onDelta, opts = {}) {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
+    signal: opts.signal,
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -181,6 +185,8 @@ async function startSession(lang) {
   $('langBadge').textContent = strings.language_name;
   $('btnRestart').hidden = false;
   $('btnRestart').textContent = strings.ui.newSession;
+  $('btnMode').hidden = false;
+  $('btnMode').textContent = strings.ui.modeLive;
   $('tapPrompt').textContent = strings.ui.tapPrompt;
   $('msgInput').placeholder = strings.ui.describePlaceholder;
   $('btnMic').textContent = strings.ui.speak;
@@ -191,6 +197,16 @@ async function startSession(lang) {
 }
 
 $('btnRestart').addEventListener('click', () => location.reload());
+
+$('btnMode').addEventListener('click', () => {
+  if ($('screen-live').hidden) {
+    $('btnMode').textContent = state.strings.ui.modeChat;
+    show('screen-live');
+  } else {
+    $('btnMode').textContent = state.strings.ui.modeLive;
+    show('screen-chat');
+  }
+});
 
 /* ---------- camera + tap + track ---------- */
 async function startCamera() {
@@ -228,9 +244,7 @@ function drawTap(x, y) {
   ctx.stroke();
 }
 
-function drawMasks(masks) {
-  const ov = $('overlay');
-  const v = $('video');
+function drawMasks(masks, ov = $('overlay'), v = $('video')) {
   ov.width = v.clientWidth;
   ov.height = v.clientHeight;
   const ctx = ov.getContext('2d');
@@ -556,6 +570,273 @@ async function showSummary() {
       `<br>${esc(t('callPro'))}${listenButton()}`,
   );
   setChips([]);
+}
+
+/* ---------- live session (Gemini-Live-style tap-to-talk) ---------- */
+const live = {
+  on: false, mode: 'idle', level: 0, abort: null,
+  audioCtx: null, analyser: null, micStream: null, recorder: null, chunks: [],
+  recStart: 0, silentMs: 0, meterTimer: null, sampleTimer: null, lastSample: 0,
+  orbRaf: null, aiBubble: null,
+};
+
+function liveStatus(key) {
+  $('liveStatus').textContent = state.strings.ui[key] || key;
+}
+
+function liveSay(text, cls) {
+  const box = $('liveTranscript');
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = text;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+function drawOrb() {
+  const c = $('orb');
+  const ctx = c.getContext('2d');
+  const W = c.width;
+  const H = c.height;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const t = Date.now() / 1000;
+  const pulse = reduceMotion ? 0.5 : 0.5 + 0.5 * Math.sin(t * (live.mode === 'speaking' ? 6 : 2.5));
+  const energy = live.mode === 'listening' ? Math.min(1, live.level * 6) : pulse * 0.7;
+  const r = W * 0.5;
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, r * 0.1, W / 2, H / 2, r * (0.55 + 0.35 * energy));
+  const hue = live.mode === 'idle' ? 160 : live.mode === 'listening' ? 150 : live.mode === 'thinking' ? 45 : 200;
+  g.addColorStop(0, `hsla(${hue}, 70%, 62%, 0.95)`);
+  g.addColorStop(0.6, `hsla(${(hue + 40) % 360}, 65%, 48%, 0.55)`);
+  g.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, r * (0.55 + 0.35 * energy), 0, Math.PI * 2);
+  ctx.fill();
+  if (live.on) live.orbRaf = requestAnimationFrame(drawOrb);
+}
+
+function enterLive() {
+  if (live.on) return;
+  live.on = true;
+  live.mode = 'idle';
+  $('btnLiveCam').textContent = t('liveCam');
+  $('btnTalk').textContent = t('liveTalk');
+  $('btnLiveEnd').textContent = t('liveEnd');
+  if (state.media) $('liveVideo').srcObject = state.media;
+  liveStatus('liveIdle');
+  drawOrb();
+  // Sample the live camera feed so every turn sees the latest frame.
+  live.sampleTimer = setInterval(() => {
+    if (shouldSampleFrame(Date.now(), live.lastSample)) {
+      live.lastSample = Date.now();
+      try {
+        state.frame = captureFrame();
+      } catch { /* camera busy */ }
+    }
+  }, 1000);
+}
+
+function leaveLive() {
+  if (!live.on) return;
+  live.on = false;
+  stopTalk(true);
+  if (live.sampleTimer) clearInterval(live.sampleTimer);
+  live.sampleTimer = null;
+  if (live.orbRaf) cancelAnimationFrame(live.orbRaf);
+  live.orbRaf = null;
+  if (live.abort) live.abort.abort();
+  live.abort = null;
+}
+
+$('btnLiveEnd').addEventListener('click', () => {
+  $('btnMode').textContent = state.strings.ui.modeLive;
+  show('screen-chat');
+});
+
+$('btnLiveCam').addEventListener('click', () => {
+  const cam = document.querySelector('.livecam');
+  cam.style.display = cam.style.display === 'none' ? '' : 'none';
+});
+
+// Tap the live preview to segment, same as the chat camera.
+$('liveOverlay').addEventListener('click', async (ev) => {
+  const r = ev.target.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width;
+  const y = (ev.clientY - r.top) / r.height;
+  state.frame = captureFrame();
+  state.trackXY = { x, y };
+  try {
+    const res = await api('/segment', {
+      sessionId: state.sessionId,
+      image: state.frame,
+      x, y,
+      w: state.frameW,
+      h: state.frameH,
+    });
+    drawMasks(res.masks || [], $('liveOverlay'), $('liveVideo'));
+  } catch { /* status line covers errors */ }
+});
+
+$('btnTalk').addEventListener('click', () => {
+  // Barge-in: talking again cancels speech AND the in-flight reply.
+  if (live.mode === 'listening') {
+    stopTalk(false);
+    return;
+  }
+  if (live.abort) live.abort.abort();
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  startTalk();
+});
+
+async function startTalk() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    live.micStream = stream;
+    live.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = live.audioCtx.createMediaStreamSource(stream);
+    live.analyser = live.audioCtx.createAnalyser();
+    live.analyser.fftSize = 1024;
+    src.connect(live.analyser);
+    live.chunks = [];
+    live.recorder = new MediaRecorder(stream);
+    live.recorder.ondataavailable = (e) => live.chunks.push(e.data);
+    live.recorder.onstop = finishTalk;
+    live.recorder.start();
+    live.recStart = Date.now();
+    live.silentMs = 0;
+    live.mode = 'listening';
+    liveStatus('liveListening');
+    $('btnTalk').classList.add('live');
+    $('btnTalk').textContent = '…';
+    const buf = new Float32Array(live.analyser.fftSize);
+    live.meterTimer = setInterval(() => {
+      live.analyser.getFloatTimeDomainData(buf);
+      const rms = rmsEnergy(buf);
+      live.level = rms;
+      if (isSpeech(rms)) live.silentMs = 0;
+      else live.silentMs += 200;
+      if (shouldStopTalking(live.silentMs, Date.now() - live.recStart)) stopTalk(false);
+      if (Date.now() - live.recStart > 20000) stopTalk(false); // hard cap
+    }, 200);
+  } catch {
+    liveStatus('liveIdle');
+    live.mode = 'idle';
+  }
+}
+
+function stopTalk(silent) {
+  if (live.meterTimer) clearInterval(live.meterTimer);
+  live.meterTimer = null;
+  $('btnTalk').classList.remove('live');
+  if (state.strings) $('btnTalk').textContent = state.strings.ui.liveTalk;
+  if (live.recorder && live.recorder.state !== 'inactive') {
+    if (silent) {
+      live.recorder.onstop = null;
+      live.recorder.stop();
+      teardownMic();
+      live.mode = 'idle';
+    } else {
+      live.recorder.stop(); // -> finishTalk
+    }
+  } else if (!silent) {
+    teardownMic();
+  }
+}
+
+function teardownMic() {
+  if (live.micStream) live.micStream.getTracks().forEach((tr) => tr.stop());
+  live.micStream = null;
+  if (live.audioCtx) live.audioCtx.close().catch(() => {});
+  live.audioCtx = null;
+  live.analyser = null;
+  live.recorder = null;
+  live.level = 0;
+}
+
+async function finishTalk() {
+  teardownMic();
+  $('btnTalk').classList.remove('live');
+  if (state.strings) $('btnTalk').textContent = state.strings.ui.liveTalk;
+  try {
+    const blob = new Blob(live.chunks, { type: live.recorder?.mimeType || 'audio/webm' });
+    if (blob.size < 2000) {
+      live.mode = 'idle';
+      liveStatus('liveIdle');
+      return; // too short, probably accidental
+    }
+    live.mode = 'thinking';
+    liveStatus('liveThinking');
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await actx.decodeAudioData(await blob.arrayBuffer());
+    const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offline.destination);
+    src.start();
+    const rendered = await offline.startRendering();
+    actx.close();
+    const wavUrl = encodeWavDataUrl(rendered.getChannelData(0), 16000);
+    const tr = await api('/transcribe', { sessionId: state.sessionId, audio: wavUrl });
+    if (tr.stopped) return showStop(tr.title, tr.message);
+    if (!tr.text) {
+      live.mode = 'idle';
+      liveStatus('liveIdle');
+      return;
+    }
+    liveSay(tr.text, 'luser');
+    // Diagnose with the latest live frame; abortable via barge-in.
+    live.abort = new AbortController();
+    const bubble = liveSay('', 'lai');
+    live.aiBubble = bubble;
+    let streamed = '';
+    const frame = state.frame || captureFrame();
+    const result = await streamApi(
+      '/diagnose/stream',
+      { sessionId: state.sessionId, transcript: tr.text, image: frame },
+      (d) => {
+        streamed += d;
+        bubble.textContent = streamed.slice(0, 600);
+      },
+      { signal: live.abort.signal },
+    );
+    live.abort = null;
+    if (!result) {
+      bubble.textContent = t('thinking');
+    } else if (result.stopped) {
+      return showStop(result.title, result.message);
+    } else if (result.question) {
+      bubble.textContent = result.question;
+      live.mode = 'speaking';
+      liveStatus('liveSpeaking');
+      speak(result.question);
+    } else if (result.steps) {
+      state.steps = result.steps.map((s) => ({ text: s, verified: false }));
+      state.currentStep = 0;
+      const text = `${result.cause || ''} ${result.steps.map((s, i) => `${t('stepOf')} ${i + 1}: ${s}`).join(' ')}`;
+      bubble.textContent = text.slice(0, 900);
+      // Mirror the steps into the chat thread for the verify loop.
+      userBubble(tr.text, frame);
+      aiCard(
+        `<span class="cause">${esc(result.cause || '')}</span>${progressBar()}${stepsList()}${listenButton()}`,
+      );
+      live.mode = 'speaking';
+      liveStatus('liveSpeaking');
+      speak(text);
+      refreshChips();
+    } else if (result.error) {
+      bubble.textContent = result.message || result.error;
+    }
+  } catch (err) {
+    if (err?.name !== 'AbortError') liveSay(String(err.message || err).slice(0, 200), 'lai');
+  } finally {
+    live.abort = null;
+    if (live.on) {
+      live.mode = 'idle';
+      liveStatus('liveIdle');
+    }
+  }
 }
 
 initLang().catch((err) => {
