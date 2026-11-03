@@ -117,6 +117,9 @@ async function streamApi(path, body, onDelta) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    if (res.status === 404 && data.error === 'not_found' && path.endsWith('/stream')) {
+      return api(path.slice(0, -'/stream'.length), body); // old server: JSON fallback
+    }
     throw new Error(data.reason || data.error || `HTTP ${res.status}`);
   }
   const reader = res.body.getReader();

@@ -77,7 +77,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 #chips { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 #chips:empty { display: none; }
 #composer { display: flex; gap: 0.5rem; align-items: flex-end; position: sticky; bottom: 0; background: #fff; padding: 0.5rem 0 0.75rem; }
-#msgInput { flex: 1; font-size: 1rem; padding: 0.55rem; border-radius: 8px; border: 1px solid #9aa79f; resize: none; font-family: inherit; }
+#msgInput { flex: 1; min-width: 0; font-size: 1rem; padding: 0.55rem; border-radius: 8px; border: 1px solid #9aa79f; resize: none; font-family: inherit; }
+#composer button { flex-shrink: 0; }
+.msg.user img { height: auto; }
 #btnMic.rec { background: #a4161a; border-color: #a4161a; color: #fff; }
 
 /* Progress */

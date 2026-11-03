@@ -127,7 +127,10 @@ function serveStatic(reqUrl, res) {
       : null;
   if (!target) return send(res, 404, { error: 'not_found' });
   const ext = target.slice(target.lastIndexOf('.'));
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  res.writeHead(200, {
+    'Content-Type': MIME[ext] || 'application/octet-stream',
+    'Cache-Control': 'no-store',
+  });
   res.end(readFileSync(target));
 }
 
