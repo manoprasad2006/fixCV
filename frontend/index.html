@@ -9,7 +9,7 @@
 <body>
 <header class="topbar">
   <span id="appName">FixCV</span>
-  <span id="langBadge"></span>
+  <span class="topright"><span id="langBadge"></span><button id="btnRestart" hidden></button></span>
 </header>
 
 <main>
@@ -27,60 +27,33 @@
     </div>
   </section>
 
-  <!-- Screen 2: camera + describe -->
-  <section id="screen-fix" hidden>
+  <!-- Screen 2: chat -->
+  <section id="screen-chat" hidden>
+    <div id="cameraCard">
+      <div class="camwrap">
+        <video id="video" playsinline muted autoplay></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="btnrow tight">
+        <button id="btnTrack" class="small"></button>
+        <span id="segStatus" class="hint"></span>
+      </div>
+    </div>
     <p id="tapPrompt" class="hint"></p>
-    <div class="camwrap">
-      <video id="video" playsinline muted autoplay></video>
-      <canvas id="overlay"></canvas>
-    </div>
-    <p id="segStatus" class="hint"></p>
-    <div class="btnrow">
-      <button id="btnTrack"></button>
-    </div>
-    <label id="describeLabel" for="transcript"></label>
-    <textarea id="transcript" rows="3"></textarea>
-    <div class="btnrow">
-      <button id="btnSpeak"></button>
-      <button id="btnSteps" class="primary"></button>
-    </div>
-    <p id="fixError" class="error"></p>
+    <div id="thread"></div>
+    <div id="chips"></div>
+    <form id="composer">
+      <textarea id="msgInput" rows="2"></textarea>
+      <button type="button" id="btnMic" title="mic"></button>
+      <button type="submit" id="btnSend" class="primary"></button>
+    </form>
   </section>
 
-  <!-- Screen 3: steps + verify -->
-  <section id="screen-steps" hidden>
-    <h2 id="causeLabel"></h2>
-    <p id="cause"></p>
-    <div class="progress"><div id="progressFill"></div></div>
-    <ol id="steps"></ol>
-    <div class="btnrow">
-      <button id="btnListen"></button>
-    </div>
-    <div id="question" class="card" hidden></div>
-    <h2 id="verifyTitle"></h2>
-    <div class="btnrow">
-      <button id="btnVerify" class="primary"></button>
-    </div>
-    <p id="verifyMsg"></p>
-    <p id="stepError" class="error"></p>
-  </section>
-
-  <!-- Screen 4: stop -->
+  <!-- Screen 3: stop -->
   <section id="screen-stop" hidden>
     <h1 id="stopTitle"></h1>
     <p id="stopMessage"></p>
     <button id="btnNew1"></button>
-  </section>
-
-  <!-- Screen 5: summary -->
-  <section id="screen-done" hidden>
-    <h1 id="summaryTitle"></h1>
-    <h2 id="fixedH"></h2>
-    <ul id="fixedList"></ul>
-    <h2 id="notFixedH"></h2>
-    <ul id="notFixedList"></ul>
-    <p id="callPro" class="hint"></p>
-    <button id="btnNew2"></button>
   </section>
 </main>
 

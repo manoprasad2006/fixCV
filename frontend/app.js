@@ -1,4 +1,5 @@
-/* FixCV frontend: language -> camera/tap -> describe -> steps -> verify -> done.
+/* FixCV chat frontend: one continuous conversation — camera card, thread,
+   contextual chips, composer with mic. Replies stream word-by-word.
    Zero dependencies. All user-facing strings come from /locales/*.json.
    New work, 2026-10-28. */
 'use strict';
@@ -6,9 +7,97 @@
 import { decodeRleToRaster } from '/shared/rle.js';
 
 const $ = (id) => document.getElementById(id);
-const state = { lang: 'en', strings: null, sessionId: null, frame: null, media: null, recording: null, tracking: false, trackTimer: null, trackXY: null };
+const state = {
+  lang: 'en', strings: null, sessionId: null, frame: null,
+  media: null, recording: null, tracking: false, trackTimer: null, trackXY: null,
+  steps: [], currentStep: 0, busy: false,
+};
 const SPEECH_LANG = { en: 'en-US', ta: 'ta-IN', hi: 'hi-IN' };
 
+function t(key) {
+  return state.strings?.ui?.[key] || key;
+}
+
+function show(id) {
+  for (const s of ['screen-lang', 'screen-chat', 'screen-stop']) $(s).hidden = s !== id;
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  if (id !== 'screen-chat' && state.tracking) stopTracking();
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = SPEECH_LANG[state.lang] || 'en-US';
+  window.speechSynthesis.speak(u);
+}
+
+/* ---------- thread rendering ---------- */
+function scrollDown() {
+  const th = $('thread');
+  th.scrollTop = th.scrollHeight;
+}
+
+function userBubble(text, imgUrl) {
+  const d = document.createElement('div');
+  d.className = 'msg user';
+  if (imgUrl) {
+    const img = document.createElement('img');
+    img.src = imgUrl;
+    img.alt = '';
+    d.appendChild(img);
+  }
+  d.appendChild(document.createTextNode(text));
+  $('thread').appendChild(d);
+  scrollDown();
+  return d;
+}
+
+function aiBubble() {
+  const d = document.createElement('div');
+  d.className = 'msg ai streaming';
+  d.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+  $('thread').appendChild(d);
+  scrollDown();
+  return d;
+}
+
+function aiCard(html) {
+  const d = document.createElement('div');
+  d.className = 'msg ai';
+  d.innerHTML = html;
+  $('thread').appendChild(d);
+  scrollDown();
+  return d;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function listenButton(playText) {
+  return `<br><button class="msgbtn small" data-listen>${esc(t('listen'))}</button>`;
+}
+
+function setChips(chips) {
+  // chips: [{label, fn}]
+  const box = $('chips');
+  box.innerHTML = '';
+  for (const c of chips) {
+    const b = document.createElement('button');
+    b.className = 'small';
+    b.textContent = c.label;
+    b.addEventListener('click', c.fn);
+    box.appendChild(b);
+  }
+}
+
+$('thread').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-listen]');
+  if (b) speak(b.closest('.msg').innerText);
+});
+
+/* ---------- server calls ---------- */
 async function api(path, body) {
   const res = await fetch(path, {
     method: 'POST',
@@ -20,34 +109,54 @@ async function api(path, body) {
   return data;
 }
 
-function show(id) {
-  for (const s of ['screen-lang', 'screen-fix', 'screen-steps', 'screen-stop', 'screen-done']) {
-    $(s).hidden = s !== id;
+async function streamApi(path, body, onDelta) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.reason || data.error || `HTTP ${res.status}`);
   }
-  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-  if (id !== 'screen-fix' && state.tracking) stopTracking();
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let result = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const blocks = buf.split('\n\n');
+    buf = blocks.pop();
+    for (const block of blocks) {
+      let event = '';
+      let data = '';
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (event === 'delta' && data) {
+        try {
+          onDelta(JSON.parse(data).text || '');
+        } catch { /* partial */ }
+      } else if (event === 'result' && data) {
+        try {
+          result = JSON.parse(data);
+        } catch { /* ignore */ }
+      }
+    }
+  }
+  return result;
 }
 
-function speak(text) {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = SPEECH_LANG[state.lang] || 'en-US';
-  window.speechSynthesis.speak(u);
-}
-
-function t(key) {
-  return key.split('.').reduce((o, k) => o?.[k], state.strings?.ui || {}) || key;
-}
-
-/* ---- Screen 1: language ---- */
+/* ---------- language + session ---------- */
 async function initLang() {
   const [en, ta, hi] = await Promise.all([
     fetch('/locales/en.json').then((r) => r.json()),
     fetch('/locales/ta.json').then((r) => r.json()),
     fetch('/locales/hi.json').then((r) => r.json()),
   ]);
-  state.disclaimers = { en: en.disclaimer, ta: ta.disclaimer, hi: hi.disclaimer };
   $('tagline').textContent = en.ui.tagline;
   $('disclaimerEn').textContent = en.disclaimer;
   $('disclaimerTa').textContent = ta.disclaimer;
@@ -67,17 +176,20 @@ async function startSession(lang) {
   state.sessionId = s.id;
   $('appName').textContent = strings.ui.appName;
   $('langBadge').textContent = strings.language_name;
+  $('btnRestart').hidden = false;
+  $('btnRestart').textContent = strings.ui.newSession;
   $('tapPrompt').textContent = strings.ui.tapPrompt;
-  $('describeLabel').textContent = strings.ui.describeLabel;
-  $('transcript').placeholder = strings.ui.describePlaceholder;
-  $('btnSpeak').textContent = strings.ui.speak;
-  $('btnSteps').textContent = strings.ui.getSteps;
+  $('msgInput').placeholder = strings.ui.describePlaceholder;
+  $('btnMic').textContent = strings.ui.speak;
+  $('btnSend').textContent = strings.ui.send;
   $('btnTrack').textContent = strings.ui.track;
   await startCamera();
-  show('screen-fix');
+  show('screen-chat');
 }
 
-/* ---- Camera + tap-to-segment ---- */
+$('btnRestart').addEventListener('click', () => location.reload());
+
+/* ---------- camera + tap + track ---------- */
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: 'environment' },
@@ -113,87 +225,6 @@ function drawTap(x, y) {
   ctx.stroke();
 }
 
-$('overlay').addEventListener('click', async (ev) => {
-  const r = ev.target.getBoundingClientRect();
-  const x = (ev.clientX - r.left) / r.width;
-  const y = (ev.clientY - r.top) / r.height;
-  drawTap(ev.clientX - r.left, ev.clientY - r.top);
-  state.frame = captureFrame();
-  state.trackXY = { x, y };
-  $('segStatus').textContent = '…';
-  try {
-    const res = await api('/segment', {
-      sessionId: state.sessionId,
-      image: state.frame,
-      x,
-      y,
-      w: state.frameW,
-      h: state.frameH,
-    });
-    drawMasks(res.masks || []);
-    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
-  } catch (err) {
-    // The captured frame is still used for diagnosis.
-    $('segStatus').textContent = String(err.message || err).slice(0, 160);
-  }
-});
-
-/* Live tracking: re-segment at the tap point every 2.5 s so the outline
-   follows the part as the camera moves. */
-async function trackOnce() {
-  if (!state.trackXY) return;
-  try {
-    const frame = captureFrame();
-    state.frame = frame;
-    const res = await api('/segment', {
-      sessionId: state.sessionId,
-      image: frame,
-      x: state.trackXY.x,
-      y: state.trackXY.y,
-      w: state.frameW,
-      h: state.frameH,
-    });
-    drawMasks(res.masks || []);
-    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
-  } catch (err) {
-    $('segStatus').textContent = String(err.message || err).slice(0, 160);
-  }
-}
-
-function stopTracking() {
-  state.tracking = false;
-  if (state.trackTimer) clearInterval(state.trackTimer);
-  state.trackTimer = null;
-  $('btnTrack').textContent = state.strings.ui.track;
-}
-
-$('btnTrack').addEventListener('click', () => {
-  if (state.tracking) {
-    stopTracking();
-    return;
-  }
-  if (!state.trackXY) {
-    $('segStatus').textContent = state.strings.ui.trackFirst;
-    return;
-  }
-  state.tracking = true;
-  $('btnTrack').textContent = state.strings.ui.stopTrack;
-  trackOnce();
-  state.trackTimer = setInterval(trackOnce, 2500);
-});
-
-/* Read the cause + steps aloud in the session language. */
-$('btnListen').addEventListener('click', () => {
-  const parts = [];
-  if ($('cause').textContent) parts.push($('cause').textContent);
-  document.querySelectorAll('#steps li').forEach((li, i) => {
-    parts.push(`${state.strings.ui.stepOf} ${i + 1}. ${li.textContent.replace(/^.*?:\s*/, '')}`);
-  });
-  if (!$('question').hidden && $('question').textContent) parts.push($('question').textContent);
-  if (parts.length) speak(parts.join(' '));
-});
-
-/* Draw SAM boxes + masks on the overlay canvas. */
 function drawMasks(masks) {
   const ov = $('overlay');
   const v = $('video');
@@ -230,7 +261,72 @@ function drawMasks(masks) {
   }
 }
 
-/* 16-bit PCM mono WAV data URL from Float32 samples. */
+$('overlay').addEventListener('click', async (ev) => {
+  const r = ev.target.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width;
+  const y = (ev.clientY - r.top) / r.height;
+  drawTap(ev.clientX - r.left, ev.clientY - r.top);
+  state.frame = captureFrame();
+  state.trackXY = { x, y };
+  $('segStatus').textContent = '…';
+  try {
+    const res = await api('/segment', {
+      sessionId: state.sessionId,
+      image: state.frame,
+      x, y,
+      w: state.frameW,
+      h: state.frameH,
+    });
+    drawMasks(res.masks || []);
+    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
+  } catch (err) {
+    $('segStatus').textContent = String(err.message || err).slice(0, 160);
+  }
+});
+
+async function trackOnce() {
+  if (!state.trackXY) return;
+  try {
+    const frame = captureFrame();
+    state.frame = frame;
+    const res = await api('/segment', {
+      sessionId: state.sessionId,
+      image: frame,
+      x: state.trackXY.x,
+      y: state.trackXY.y,
+      w: state.frameW,
+      h: state.frameH,
+    });
+    drawMasks(res.masks || []);
+    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
+  } catch (err) {
+    $('segStatus').textContent = String(err.message || err).slice(0, 160);
+  }
+}
+
+function stopTracking() {
+  state.tracking = false;
+  if (state.trackTimer) clearInterval(state.trackTimer);
+  state.trackTimer = null;
+  if (state.strings) $('btnTrack').textContent = state.strings.ui.track;
+}
+
+$('btnTrack').addEventListener('click', () => {
+  if (state.tracking) {
+    stopTracking();
+    return;
+  }
+  if (!state.trackXY) {
+    $('segStatus').textContent = state.strings.ui.trackFirst;
+    return;
+  }
+  state.tracking = true;
+  $('btnTrack').textContent = state.strings.ui.stopTrack;
+  trackOnce();
+  state.trackTimer = setInterval(trackOnce, 2500);
+});
+
+/* ---------- mic ---------- */
 function encodeWavDataUrl(samples, sampleRate) {
   const n = samples.length;
   const buf = new ArrayBuffer(44 + n * 2);
@@ -261,8 +357,7 @@ function encodeWavDataUrl(samples, sampleRate) {
   return `data:audio/wav;base64,${btoa(bin)}`;
 }
 
-/* ---- Mic (typed input is the fallback) ---- */
-$('btnSpeak').addEventListener('click', async () => {
+$('btnMic').addEventListener('click', async () => {
   if (state.recording) {
     state.recording.stop();
     return;
@@ -275,10 +370,8 @@ $('btnSpeak').addEventListener('click', async () => {
     rec.onstop = async () => {
       stream.getTracks().forEach((tr) => tr.stop());
       state.recording = null;
-      $('btnSpeak').disabled = false;
+      $('btnMic').classList.remove('rec');
       try {
-        // Decode whatever the browser recorded, resample to 16 kHz mono,
-        // and send WAV — the only encoding verified against the ASR API.
         const blob = new Blob(chunks, { type: rec.mimeType });
         const actx = new (window.AudioContext || window.webkitAudioContext)();
         const decoded = await actx.decodeAudioData(await blob.arrayBuffer());
@@ -291,90 +384,27 @@ $('btnSpeak').addEventListener('click', async () => {
         const wavUrl = encodeWavDataUrl(rendered.getChannelData(0), 16000);
         actx.close();
         const res = await api('/transcribe', { sessionId: state.sessionId, audio: wavUrl });
-        if (res.text) $('transcript').value = res.text;
-        if (res.stopped) showStop(res.title, res.message);
+        if (res.stopped) return showStop(res.title, res.message);
+        if (res.text) {
+          $('msgInput').value = res.text;
+          sendMessage(); // mic sends straight into the chat
+        }
       } catch (err) {
-        $('fixError').textContent = String(err.message || err).slice(0, 200);
+        aiCard(esc(String(err.message || err).slice(0, 200)));
       }
     };
     state.recording = rec;
     rec.start();
-    $('btnSpeak').disabled = true;
+    $('btnMic').classList.add('rec');
     setTimeout(() => {
       if (state.recording === rec) rec.stop();
     }, 15000);
   } catch {
-    $('fixError').textContent = t('speakUnavailable') === 'speakUnavailable' ? 'mic unavailable' : t('speakUnavailable');
+    aiCard(esc(t('speak')));
   }
 });
 
-/* ---- Diagnose ---- */
-$('btnSteps').addEventListener('click', async () => {
-  $('fixError').textContent = '';
-  $('btnSteps').disabled = true;
-  try {
-    if (!state.frame) state.frame = captureFrame();
-    const res = await api('/diagnose', {
-      sessionId: state.sessionId,
-      transcript: $('transcript').value.trim(),
-      image: state.frame,
-    });
-    if (res.stopped) return showStop(res.title, res.message);
-    $('causeLabel').textContent = state.strings.ui.causeLabel;
-    $('verifyTitle').textContent = state.strings.ui.showResult;
-    $('btnVerify').textContent = state.strings.ui.verify;
-    $('btnListen').textContent = state.strings.ui.listen;
-    if (res.question) {
-      $('cause').textContent = '';
-      $('steps').innerHTML = '';
-      $('question').hidden = false;
-      $('question').textContent = res.question;
-    } else {
-      $('cause').textContent = res.cause || '';
-      $('question').hidden = true;
-      renderSteps(res.steps.map((text) => ({ text, verified: false })), 0);
-    }
-    show('screen-steps');
-  } catch (err) {
-    $('fixError').textContent = String(err.message || err).slice(0, 300);
-  } finally {
-    $('btnSteps').disabled = false;
-  }
-});
-
-function renderSteps(steps, current) {
-  const ol = $('steps');
-  ol.innerHTML = '';
-  steps.forEach((s, i) => {
-    const li = document.createElement('li');
-    li.textContent = `${state.strings.ui.stepOf} ${i + 1}: ${s.text}`;
-    if (s.verified || i < current) li.className = 'done';
-    else if (i === current) li.className = 'current';
-    ol.appendChild(li);
-  });
-  const done = steps.filter((s) => s.verified).length;
-  $('progressFill').style.width = steps.length ? `${Math.round((100 * done) / steps.length)}%` : '0';
-}
-
-/* ---- Verify loop ---- */
-$('btnVerify').addEventListener('click', async () => {
-  $('stepError').textContent = '';
-  $('btnVerify').disabled = true;
-  try {
-    const res = await api('/verify', { sessionId: state.sessionId, image: captureFrame() });
-    if (res.stopped) return showStop(res.title, res.message);
-    $('verifyMsg').textContent = res.message || '';
-    const s = await fetch(`/session?id=${state.sessionId}`).then((r) => r.json());
-    renderSteps(s.steps, s.currentStep);
-    if (res.done || s.done) return showSummary(s);
-  } catch (err) {
-    $('stepError').textContent = String(err.message || err).slice(0, 300);
-  } finally {
-    $('btnVerify').disabled = false;
-  }
-});
-
-/* ---- Stop + summary ---- */
+/* ---------- chat flow ---------- */
 function showStop(title, message) {
   $('stopTitle').textContent = title || state.strings.stop.title;
   $('stopMessage').textContent = message || state.strings.stop.generic;
@@ -382,26 +412,148 @@ function showStop(title, message) {
   show('screen-stop');
 }
 
-function showSummary(s) {
-  $('summaryTitle').textContent = state.strings.ui.summaryTitle;
-  $('fixedH').textContent = state.strings.ui.fixed;
-  $('notFixedH').textContent = state.strings.ui.notFixed;
-  $('callPro').textContent = state.strings.ui.callPro;
-  $('btnNew2').textContent = state.strings.ui.newSession;
-  const fixed = $('fixedList');
-  const notFixed = $('notFixedList');
-  fixed.innerHTML = '';
-  notFixed.innerHTML = '';
-  for (const st of s.steps) {
-    const li = document.createElement('li');
-    li.textContent = st.text;
-    (st.verified ? fixed : notFixed).appendChild(li);
-  }
-  show('screen-done');
+$('btnNew1').addEventListener('click', () => location.reload());
+
+function progressBar() {
+  const done = state.steps.filter((s) => s.verified).length;
+  const pct = state.steps.length ? Math.round((100 * done) / state.steps.length) : 0;
+  return `<div class="progress"><div class="progressFill" style="width:${pct}%"></div></div>`;
 }
 
-$('btnNew1').addEventListener('click', () => location.reload());
-$('btnNew2').addEventListener('click', () => location.reload());
+function stepsList() {
+  return `<ol>${state.steps
+    .map((s, i) => {
+      const cls = s.verified || i < state.currentStep ? 'done' : i === state.currentStep ? 'current' : '';
+      return `<li class="${cls}">${esc(s.text)}</li>`;
+    })
+    .join('')}</ol>`;
+}
+
+function refreshChips() {
+  if (state.currentStep < state.steps.length) {
+    const label = `${t('checkStep')} (${t('stepOf')} ${state.currentStep + 1})`;
+    setChips([{ label, fn: checkCurrentStep }]);
+  } else {
+    setChips([]);
+  }
+}
+
+async function sendMessage() {
+  const text = $('msgInput').value.trim();
+  if (!text || state.busy) return;
+  state.busy = true;
+  $('msgInput').value = '';
+  setChips([]);
+  const frame = captureFrame();
+  userBubble(text, frame);
+  const bubble = aiBubble();
+  let streamed = '';
+  try {
+    const result = await streamApi(
+      '/diagnose/stream',
+      { sessionId: state.sessionId, transcript: text, image: frame },
+      (d) => {
+        streamed += d;
+        bubble.classList.remove('streaming');
+        bubble.textContent = streamed;
+        scrollDown();
+      },
+    );
+    bubble.remove();
+    if (!result) {
+      aiCard(esc(t('thinking')));
+    } else if (result.stopped) {
+      showStop(result.title, result.message);
+    } else if (result.question) {
+      const c = aiCard(`${esc(result.question)}${listenButton()}`);
+      void c;
+    } else if (result.steps) {
+      state.steps = result.steps.map((s) => ({ text: s, verified: false }));
+      state.currentStep = 0;
+      aiCard(
+        `<span class="cause">${esc(result.cause || '')}</span>${progressBar()}${stepsList()}${listenButton()}`,
+      );
+      if (state.strings) speak(`${result.cause || ''}. ${result.steps.join('. ')}`);
+      refreshChips();
+    } else if (result.error) {
+      aiCard(esc(result.message || result.error));
+    }
+  } catch (err) {
+    bubble.remove();
+    aiCard(esc(String(err.message || err).slice(0, 300)));
+  } finally {
+    state.busy = false;
+  }
+}
+
+$('composer').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  sendMessage();
+});
+
+async function checkCurrentStep() {
+  if (state.busy) return;
+  state.busy = true;
+  setChips([]);
+  const frame = captureFrame();
+  userBubble(`${t('checkStep')} (${t('stepOf')} ${state.currentStep + 1})`, frame);
+  const bubble = aiBubble();
+  let streamed = '';
+  try {
+    const result = await streamApi(
+      '/verify/stream',
+      { sessionId: state.sessionId, image: frame },
+      (d) => {
+        streamed += d;
+        bubble.classList.remove('streaming');
+        bubble.textContent = streamed;
+        scrollDown();
+      },
+    );
+    bubble.remove();
+    if (!result) {
+      aiCard(esc(t('thinking')));
+    } else if (result.stopped) {
+      showStop(result.title, result.message);
+    } else if (result.error) {
+      aiCard(esc(result.message || result.error));
+      refreshChips();
+    } else if (result.done && result.status !== 'confirmed' && !result.message) {
+      showSummary();
+    } else {
+      const cls = result.status === 'confirmed' ? 'verdict-ok' : 'verdict-fix';
+      const s = await fetch(`/session?id=${state.sessionId}`).then((r) => r.json());
+      state.steps = s.steps;
+      state.currentStep = s.currentStep;
+      aiCard(
+        `<span class="${cls}">${esc(result.message || '')}</span>${progressBar()}${stepsList()}${listenButton()}`,
+      );
+      speak(result.message || '');
+      if (result.done || s.done) showSummary();
+      else refreshChips();
+    }
+  } catch (err) {
+    bubble.remove();
+    aiCard(esc(String(err.message || err).slice(0, 300)));
+    refreshChips();
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function showSummary() {
+  const s = await fetch(`/session?id=${state.sessionId}`).then((r) => r.json());
+  const fixed = s.steps.filter((x) => x.verified);
+  const open = s.steps.filter((x) => !x.verified);
+  const li = (items) => (items.length ? `<ul>${items.map((x) => `<li>${esc(x.text)}</li>`).join('')}</ul>` : '');
+  aiCard(
+    `<span class="cause">${esc(t('summaryTitle'))}</span>` +
+      `<br><b>${esc(t('fixed'))}</b>${li(fixed)}` +
+      `<b>${esc(t('notFixed'))}</b>${li(open)}` +
+      `<br>${esc(t('callPro'))}${listenButton()}`,
+  );
+  setChips([]);
+}
 
 initLang().catch((err) => {
   $('chooseLanguage').textContent = `Failed to load: ${err.message}`;

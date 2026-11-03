@@ -9,13 +9,35 @@ import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHardStop } from './safety.js';
 import { createSession, getSession, setSteps, advanceStep, appendHistory, summary } from './session.js';
-import { sparkChat, renderPrompt, userMessage, transcribe } from './meta.js';
+import { sparkChat, sparkChatStream, renderPrompt, userMessage, transcribe } from './meta.js';
 import { segmentAtPoint } from './sam.js';
 import { openChat, openModelEnabled } from './baseten.js';
 
 /** Reasoning backend: Baseten open model when selected, else Muse Spark. */
 function reason(messages) {
   return openModelEnabled() ? openChat(messages) : sparkChat(messages);
+}
+
+/** Streaming reasoning: true deltas on Spark; one shot on the open model. */
+async function streamReason(messages, onDelta) {
+  if (openModelEnabled()) {
+    const full = await openChat(messages);
+    onDelta(full);
+    return full;
+  }
+  return sparkChatStream(messages, { onDelta });
+}
+
+function sseHead(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+}
+
+function sseSend(res, event, data) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,6 +145,92 @@ const server = createServer(async (req, res) => {
       const { language } = await readJson(req);
       const s = createSession(language);
       return send(res, 200, { id: s.id, language: s.language });
+    }
+    if (req.method === 'POST' && url.pathname === '/diagnose/stream') {
+      const { sessionId, transcript = '', image = null } = await readJson(req);
+      const s = getSession(sessionId);
+      if (!s) return send(res, 404, { error: 'no_session' });
+      sseHead(res);
+      try {
+        const pre = checkHardStop(transcript);
+        if (pre.stopped) {
+          sseSend(res, 'result', stopResponse(s.language, pre.category));
+          return res.end();
+        }
+        const prompt = renderPrompt('diagnose.txt', {
+          language: s.language,
+          language_name: LANG_NAMES[s.language],
+          transcript,
+        });
+        const reply = await streamReason([userMessage(prompt, image)], (d) => sseSend(res, 'delta', { text: d }));
+        const post = checkHardStop(reply);
+        if (post.stopped) {
+          sseSend(res, 'result', stopResponse(s.language, post.category));
+          return res.end();
+        }
+        const parsed = parseDiagnose(reply);
+        if (parsed.unsafe) {
+          sseSend(res, 'result', { stopped: true, category: 'model', message: parsed.unsafe });
+          return res.end();
+        }
+        appendHistory(sessionId, { kind: 'diagnose', transcript: String(transcript).slice(0, 500) });
+        if (parsed.question || !parsed.steps.length) {
+          sseSend(res, 'result', { stopped: false, question: parsed.question || reply.slice(0, 500) });
+          return res.end();
+        }
+        setSteps(sessionId, parsed.steps);
+        sseSend(res, 'result', { stopped: false, cause: parsed.cause, steps: parsed.steps });
+        return res.end();
+      } catch (err) {
+        sseSend(res, 'result', { error: 'server_error', message: String(err.message || err).slice(0, 300) });
+        return res.end();
+      }
+    }
+    if (req.method === 'POST' && url.pathname === '/verify/stream') {
+      const { sessionId, image = null, note = '' } = await readJson(req);
+      const s = getSession(sessionId);
+      if (!s) return send(res, 404, { error: 'no_session' });
+      const cur = s.steps[s.currentStep];
+      sseHead(res);
+      try {
+        if (!cur) {
+          sseSend(res, 'result', { done: true });
+          return res.end();
+        }
+        const pre = checkHardStop(note);
+        if (pre.stopped) {
+          sseSend(res, 'result', stopResponse(s.language, pre.category));
+          return res.end();
+        }
+        const prompt = renderPrompt('verify.txt', {
+          language: s.language,
+          language_name: LANG_NAMES[s.language],
+          step_text: `Step ${s.currentStep + 1}: ${cur.text}`,
+          note,
+        });
+        const reply = await streamReason([userMessage(prompt, image)], (d) => sseSend(res, 'delta', { text: d }));
+        const post = checkHardStop(reply);
+        if (post.stopped) {
+          sseSend(res, 'result', stopResponse(s.language, post.category));
+          return res.end();
+        }
+        const parsed = parseVerify(reply);
+        if (parsed.status === 'unsafe') {
+          sseSend(res, 'result', { stopped: true, category: 'model', message: parsed.message });
+          return res.end();
+        }
+        appendHistory(sessionId, { kind: 'verify', step: s.currentStep, status: parsed.status });
+        if (parsed.status === 'confirmed') {
+          const updated = advanceStep(sessionId);
+          sseSend(res, 'result', { status: 'confirmed', message: parsed.message, done: updated.done, nextStep: updated.steps[updated.currentStep]?.text ?? null });
+          return res.end();
+        }
+        sseSend(res, 'result', { status: parsed.status, message: parsed.message, done: false });
+        return res.end();
+      } catch (err) {
+        sseSend(res, 'result', { error: 'server_error', message: String(err.message || err).slice(0, 300) });
+        return res.end();
+      }
     }
     if (req.method === 'POST' && url.pathname === '/diagnose') {
       const { sessionId, transcript = '', image = null } = await readJson(req);

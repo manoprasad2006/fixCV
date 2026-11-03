@@ -104,6 +104,50 @@ export async function transcribe(wavBuffer, { language = 'en' } = {}) {
   return String(data?.transcript ?? '');
 }
 
+/**
+ * Streaming chat completion. Calls onDelta(text) as chunks arrive and
+ * resolves with the full content. Throws on transport errors or empty reply
+ * (with one double-budget non-streaming retry, as in sparkChat).
+ */
+export async function sparkChatStream(messages, { model = SPARK_MODEL, maxTokens = 2000, onDelta = () => {} } = {}) {
+  assertKey();
+  const res = await fetch(`${META_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages, stream: true }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(`Meta API ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let full = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const data = t.slice(5).trim();
+      if (data === '[DONE]') break;
+      try {
+        const delta = JSON.parse(data)?.choices?.[0]?.delta?.content || '';
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      } catch { /* keep-alive */ }
+    }
+  }
+  if (!full) return sparkChat(messages, { model, maxTokens: maxTokens * 2 });
+  return full;
+}
+
 /** Build a user message with optional frame image (data URL). */
 export function userMessage(text, imageDataUrl) {
   if (!imageDataUrl) return { role: 'user', content: text };
