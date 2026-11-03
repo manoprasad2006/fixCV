@@ -6,7 +6,8 @@
 import { decodeRleToRaster } from '/shared/rle.js';
 
 const $ = (id) => document.getElementById(id);
-const state = { lang: 'en', strings: null, sessionId: null, frame: null, media: null, recording: null };
+const state = { lang: 'en', strings: null, sessionId: null, frame: null, media: null, recording: null, tracking: false, trackTimer: null, trackXY: null };
+const SPEECH_LANG = { en: 'en-US', ta: 'ta-IN', hi: 'hi-IN' };
 
 async function api(path, body) {
   const res = await fetch(path, {
@@ -23,6 +24,16 @@ function show(id) {
   for (const s of ['screen-lang', 'screen-fix', 'screen-steps', 'screen-stop', 'screen-done']) {
     $(s).hidden = s !== id;
   }
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  if (id !== 'screen-fix' && state.tracking) stopTracking();
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = SPEECH_LANG[state.lang] || 'en-US';
+  window.speechSynthesis.speak(u);
 }
 
 function t(key) {
@@ -61,6 +72,7 @@ async function startSession(lang) {
   $('transcript').placeholder = strings.ui.describePlaceholder;
   $('btnSpeak').textContent = strings.ui.speak;
   $('btnSteps').textContent = strings.ui.getSteps;
+  $('btnTrack').textContent = strings.ui.track;
   await startCamera();
   show('screen-fix');
 }
@@ -107,6 +119,7 @@ $('overlay').addEventListener('click', async (ev) => {
   const y = (ev.clientY - r.top) / r.height;
   drawTap(ev.clientX - r.left, ev.clientY - r.top);
   state.frame = captureFrame();
+  state.trackXY = { x, y };
   $('segStatus').textContent = '…';
   try {
     const res = await api('/segment', {
@@ -123,6 +136,61 @@ $('overlay').addEventListener('click', async (ev) => {
     // The captured frame is still used for diagnosis.
     $('segStatus').textContent = String(err.message || err).slice(0, 160);
   }
+});
+
+/* Live tracking: re-segment at the tap point every 2.5 s so the outline
+   follows the part as the camera moves. */
+async function trackOnce() {
+  if (!state.trackXY) return;
+  try {
+    const frame = captureFrame();
+    state.frame = frame;
+    const res = await api('/segment', {
+      sessionId: state.sessionId,
+      image: frame,
+      x: state.trackXY.x,
+      y: state.trackXY.y,
+      w: state.frameW,
+      h: state.frameH,
+    });
+    drawMasks(res.masks || []);
+    $('segStatus').textContent = `${(res.masks || []).length} region(s)`;
+  } catch (err) {
+    $('segStatus').textContent = String(err.message || err).slice(0, 160);
+  }
+}
+
+function stopTracking() {
+  state.tracking = false;
+  if (state.trackTimer) clearInterval(state.trackTimer);
+  state.trackTimer = null;
+  $('btnTrack').textContent = state.strings.ui.track;
+}
+
+$('btnTrack').addEventListener('click', () => {
+  if (state.tracking) {
+    stopTracking();
+    return;
+  }
+  if (!state.trackXY) {
+    $('segStatus').textContent = state.strings.ui.trackFirst;
+    return;
+  }
+  state.tracking = true;
+  $('btnTrack').textContent = state.strings.ui.stopTrack;
+  trackOnce();
+  state.trackTimer = setInterval(trackOnce, 2500);
+});
+
+/* Read the cause + steps aloud in the session language. */
+$('btnListen').addEventListener('click', () => {
+  const parts = [];
+  if ($('cause').textContent) parts.push($('cause').textContent);
+  document.querySelectorAll('#steps li').forEach((li, i) => {
+    parts.push(`${state.strings.ui.stepOf} ${i + 1}. ${li.textContent.replace(/^.*?:\s*/, '')}`);
+  });
+  if (!$('question').hidden && $('question').textContent) parts.push($('question').textContent);
+  if (parts.length) speak(parts.join(' '));
 });
 
 /* Draw SAM boxes + masks on the overlay canvas. */
@@ -255,6 +323,7 @@ $('btnSteps').addEventListener('click', async () => {
     $('causeLabel').textContent = state.strings.ui.causeLabel;
     $('verifyTitle').textContent = state.strings.ui.showResult;
     $('btnVerify').textContent = state.strings.ui.verify;
+    $('btnListen').textContent = state.strings.ui.listen;
     if (res.question) {
       $('cause').textContent = '';
       $('steps').innerHTML = '';
@@ -280,8 +349,11 @@ function renderSteps(steps, current) {
     const li = document.createElement('li');
     li.textContent = `${state.strings.ui.stepOf} ${i + 1}: ${s.text}`;
     if (s.verified || i < current) li.className = 'done';
+    else if (i === current) li.className = 'current';
     ol.appendChild(li);
   });
+  const done = steps.filter((s) => s.verified).length;
+  $('progressFill').style.width = steps.length ? `${Math.round((100 * done) / steps.length)}%` : '0';
 }
 
 /* ---- Verify loop ---- */

@@ -42,6 +42,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 textarea { width: 100%; font-size: 1rem; padding: 0.5rem; border-radius: 8px; border: 1px solid #9aa79f; margin-top: 0.3rem; }
 ol#steps li, ul li { margin-bottom: 0.5rem; }
 ol#steps li.done { text-decoration: line-through; color: #3c4a43; }
+ol#steps li.current { background: #e3efe8; border-radius: 6px; }
+.progress { height: 10px; background: #d6dcd6; border-radius: 6px; margin-top: 0.5rem; overflow: hidden; }
+#progressFill { height: 100%; width: 0; background: #123c2b; }
 .card { border: 1px solid #9aa79f; border-radius: 8px; padding: 0.7rem; margin-top: 0.6rem; }
 #screen-stop { border-color: #a4161a; }
 #screen-stop h1 { color: #a4161a; }
